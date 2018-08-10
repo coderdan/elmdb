@@ -37,6 +37,7 @@
 
 #include "lmdb.h"
 #include "queue.h"
+#include "mdb_ore_blk_compare.h"
 
 typedef struct _OpEntry {
   uint64_t txn_ref;
@@ -966,6 +967,72 @@ static MDB_txn* elmdb_txn_put_handler(MDB_txn *txn, OpEntry *op) {
   enif_release_resource(args->elmdb_dbi);
   return txn;
 }
+
+
+/* DD Added */
+
+static int internal_comparator(const MDB_val *a, const MDB_val *b) {
+  printf("COMP, a:size = %d\n", a->mv_size); fflush(stdout);
+  return 0;
+}
+
+static MDB_txn* elmdb_set_comparator_handler(MDB_txn *txn, OpEntry *op) {
+  kv_args *args = (kv_args*)op->args;
+  int ret;
+
+  LOG("Setting comparator\n");
+
+  if ((ret = mdb_set_compare(txn, args->elmdb_dbi->dbi, mdb_ore_blk_compare)) != MDB_SUCCESS) {
+    SEND_ERRNO(op, ret);
+  }
+  else {
+    SEND(op, ATOM_OK);
+  }
+  enif_release_resource(args->elmdb_txn);
+  enif_release_resource(args->elmdb_dbi);
+  return txn;
+}
+
+static ERL_NIF_TERM do_set_comparator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[], MDB_txn* (*handler)(MDB_txn*, OpEntry*)) {
+  ElmdbTxn *elmdb_txn;
+  ElmdbDbi *elmdb_dbi;
+
+  if(!(argc == 3 &&
+       enif_is_ref(env, argv[0]) &&
+       enif_get_resource(env, argv[1], elmdb_txn_res, (void**)&elmdb_txn) &&
+       enif_get_resource(env, argv[2], elmdb_dbi_res, (void**)&elmdb_dbi))) {
+    return BADARG;
+  }
+
+  enif_mutex_lock(elmdb_txn->elmdb_env->txn_lock);
+  CHECK_ENV(elmdb_txn->elmdb_env);
+  if(elmdb_txn->ref != elmdb_txn->elmdb_env->active_txn_ref) {
+    enif_mutex_unlock(elmdb_txn->elmdb_env->txn_lock);
+    return ERR(ATOM_TXN_CLOSED);
+  }
+  enif_mutex_unlock(elmdb_txn->elmdb_env->txn_lock);
+  if(elmdb_txn->elmdb_env->ref != elmdb_dbi->elmdb_env->ref)
+    return BADARG;
+  kv_args *args = enif_alloc(sizeof(kv_args));
+  NEW_OP_(op, args, handler);
+  op->txn_ref = elmdb_txn->ref;
+
+  args->elmdb_txn   = elmdb_txn;
+  args->elmdb_dbi   = elmdb_dbi;
+  enif_keep_resource(elmdb_txn);
+  enif_keep_resource(elmdb_dbi);
+  enif_mutex_lock(elmdb_txn->elmdb_env->op_lock);
+  PUSH(elmdb_txn->elmdb_env->op_queue, op);
+  enif_mutex_unlock(elmdb_txn->elmdb_env->op_lock);
+  return ATOM_OK;
+}
+
+static ERL_NIF_TERM elmdb_set_comparator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+  return do_set_comparator(env, argc, argv, elmdb_set_comparator_handler);
+}
+
+/*****************/
+
 
 static ERL_NIF_TERM do_txn_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[], MDB_txn* (*handler)(MDB_txn*, OpEntry*)) {
   ElmdbTxn *elmdb_txn;
@@ -2413,6 +2480,8 @@ static ErlNifFunc nif_funcs [] = {
   {"get",      2, elmdb_get, 0},
   {"delete",   2, elmdb_delete, 0},
   {"drop",     1, elmdb_drop, 0},
+
+  {"nif_set_comparator", 3, elmdb_set_comparator},
 
   {"nif_async_put",     4, elmdb_async_put, 0},
   {"nif_async_put_new", 4, elmdb_async_put_new, 0},
