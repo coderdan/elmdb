@@ -21,9 +21,9 @@ static void print_b64(byte *data, int size) {
 }
 
 static void print_ct_b64(ore_blk_ciphertext ct) {
-  DEBUG("LEFT: ");
+  DEBUG("\rLEFT: ");
   print_b64(ct->comp_left, ct->left_size);
-  DEBUG("RIGHT: ");
+  DEBUG("\rRIGHT: ");
   print_b64(ct->comp_right, ct->right_size);
 }
 
@@ -36,6 +36,23 @@ int mdb_ore_blk_compare(const MDB_val *a, const MDB_val *b) {
   ore_blk_ciphertext cipher_text_a;
   ore_blk_ciphertext cipher_text_b;
 
+  /* Check if the first 32 bytes (the handle) are the same.
+   * IFF do we then check the ORE component of the key
+   */
+  int handle_cmp = memcmp(a->mv_data, b->mv_data, 32);
+  if (handle_cmp != 0) {
+    if (handle_cmp < 0) {
+      DEBUG("\rELMDB-H: <\n");
+      return -1;
+    } else {
+      DEBUG("\rELMDB-H: >\n");
+      return 1;
+    }
+  }
+  DEBUG("\rELMDB-H: =\n");
+
+  // FIXME: ORE check will never run
+
   // TODO: Check the return state (like the CHECK macro)
   init_ore_blk_params(params, nbits, block_len);
 
@@ -45,19 +62,19 @@ int mdb_ore_blk_compare(const MDB_val *a, const MDB_val *b) {
 
   // TODO: Check that a->mv_size = left_size + right_size
   
-  byte *a_left  = (byte *)a->mv_data;
-  byte *a_right = (byte *)a->mv_data + cipher_text_a->left_size;
-  byte *b_left  = (byte *)b->mv_data;
-  byte *b_right = (byte *)b->mv_data + cipher_text_b->left_size;
+  byte *a_left  = (byte *)a->mv_data + 32;
+  byte *a_right = (byte *)a->mv_data + 32 + cipher_text_a->left_size;
+  byte *b_left  = (byte *)b->mv_data + 32;
+  byte *b_right = (byte *)b->mv_data + 32 + cipher_text_b->left_size;
 
   memcpy(cipher_text_a->comp_left, a_left, cipher_text_a->left_size);
   memcpy(cipher_text_a->comp_right, a_right, cipher_text_a->right_size);
   memcpy(cipher_text_b->comp_left, b_left, cipher_text_b->left_size);
   memcpy(cipher_text_b->comp_right, b_right, cipher_text_b->right_size);
 
-  DEBUG("CTS in compare\n");
-  print_ct_b64(cipher_text_a);
-  print_ct_b64(cipher_text_b);
+  //DEBUG("\rCTS in compare\n");
+  //print_ct_b64(cipher_text_a);
+  //print_ct_b64(cipher_text_b);
 
   /* Initialise the cipher text structs with passed values, probs should create a function to do this in ore_blk */
 
@@ -68,9 +85,11 @@ int mdb_ore_blk_compare(const MDB_val *a, const MDB_val *b) {
     return -1;
   }
 
-  DEBUG("Compare result: %d\n", result);
+  DEBUG("\rORE: %d\n", result);
 
-  // TODO: Free the memories!
+  // Free the memories!
+  clear_ore_blk_ciphertext(cipher_text_a);
+  clear_ore_blk_ciphertext(cipher_text_b);
 
   return result;
 }

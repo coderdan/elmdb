@@ -453,6 +453,9 @@ static int to_mdb_cursor_op(ErlNifEnv *env, ERL_NIF_TERM op, MDB_val *key) {
   return 0;
 }
 
+/* FIXME (DD 26/8/2018) this function should return some
+ * sensible error codes so that callers in erlang know what is going on.
+ * Plus just exiting the erlang thread blindly is causing the BEAM to segfault.*/
 static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflags, int *ret) {
   ElmdbEnv *elmdb_env;
 
@@ -471,14 +474,22 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   STAILQ_INIT(&elmdb_env->op_queue);
   STAILQ_INIT(&elmdb_env->txn_queue);
 
-  if((*ret = mdb_env_create(&(elmdb_env->env))) != MDB_SUCCESS)
+  if((*ret = mdb_env_create(&(elmdb_env->env))) != MDB_SUCCESS) {
+    printf("Failed `mdb_env_create`\n");
     goto err1;
-  if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS)
+  }
+  if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS) {
+    printf("Failed `mdb_env_set_mapsize`\n");
     goto err1;
-  if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS)
+  }
+  if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS) {
+    printf("Failed `mdb_env_set_maxdbs`\n");
     goto err1;
-  if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS)
+  }
+  if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS) {
+    printf("Failed `mdb_env_open`\n");
     goto err2;
+  }
   if((elmdb_env->op_lock = enif_mutex_create(elmdb_env->path)) == NULL)
     goto err2;
   if((elmdb_env->txn_lock = enif_mutex_create(elmdb_env->path)) == NULL)
@@ -489,8 +500,10 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   return elmdb_env;
 
  err2:
+  printf("AT ERR2\n");
   mdb_env_close(elmdb_env->env);
  err1:
+  printf("AT ERR1\n");
   return NULL;
 }
 
@@ -526,6 +539,8 @@ static void close_env(ElmdbEnv *elmdb_env) {
 }
 
 static int register_env(ElmdbPriv *priv, ElmdbEnv *elmdb_env) {
+  printf("register env\n");
+  printf("Attempting to allocate %u\n", sizeof(EnvEntry));
   EnvEntry *env_entry = enif_alloc(sizeof(EnvEntry));
   if(env_entry == NULL)
     return 0;
@@ -562,6 +577,8 @@ static void* elmdb_env_thread(void *p) {
   OpEntry *q_op = NULL;
 
   if((elmdb_env = open_env(args->path, args->mapsize, args->maxdbs, args->envflags, &ret)) == NULL) {
+    /* This sends a message to the calling erlang process - how do we receive it? */
+    printf("ERROR code: %d\n", ret);
     SEND_ERRNO(args, ret);
     enif_free_env(args->msg_env);
     goto shutdown;
@@ -616,6 +633,7 @@ static void* elmdb_env_thread(void *p) {
   }
   enif_mutex_unlock(elmdb_env->txn_lock);
  shutdown:
+  printf("Shutdown\n");
   unregister_env(priv, elmdb_env);
   close_env(elmdb_env);
   return NULL;
@@ -755,16 +773,20 @@ static ERL_NIF_TERM elmdb_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if(enif_get_string(env, argv[1], args->path, MAXPATHLEN, ERL_NIF_LATIN1) == 0)
     return BADARG;
 
+  printf("AAA\n");
   if(get_env_open_opts(env, argv[2], &args->mapsize, &args->maxdbs, &args->envflags) == 0)
     return BADARG;
 
+  printf("BBB\n");
   args->priv = (ElmdbPriv*)enif_priv_data(env);
   args->msg_env = enif_alloc_env();
   args->ref = enif_make_copy(args->msg_env, argv[0]);
   enif_self(env, &args->caller);
   ErlNifTid tid;
+  printf("CCC\n");
   if((ret = enif_thread_create(args->path, &tid, elmdb_env_thread, args, NULL)) != 0)
     return ERRNO(ret);
+  printf("DDD\n");
 
   return ATOM_OK;
 }

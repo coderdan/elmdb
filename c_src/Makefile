@@ -10,6 +10,9 @@ ERTS_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s/erts
 ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, include)]).")
 ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, lib)]).")
 
+BLK_ORE_INCLUDE_DIR=/Users/daniel/Projects/Open/ex_ore/c_src
+BLK_ORE_LIB_DIR=/Users/daniel/Projects/Open/ex_ore/priv
+
 C_SRC_DIR = $(CURDIR)
 C_SRC_OUTPUT ?= $(CURDIR)/../priv/$(PROJECT).so
 
@@ -32,10 +35,10 @@ else ifeq ($(UNAME_SYS), Linux)
 	CXXFLAGS ?= -O3 -finline-functions -Wall
 endif
 
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I/usr/include/malloc -I/usr/local/opt/openssl@1.1/include
+CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(BLK_ORE_INCLUDE_DIR) -I/usr/include/malloc -I/usr/local/opt/openssl@1.1/include
 CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR)
 
-LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -lgmp -lssl -lcrypto -L/usr/lib -L/usr/local/opt/openssl@1.1/lib
+LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -L $(BLK_ORE_LIB_DIR) -lerl_interface -lei -lgmp -lssl -lcrypto -loreblk -L/usr/lib -L/usr/local/opt/openssl@1.1/lib
 LDFLAGS += -shared
 
 # Verbosity.
