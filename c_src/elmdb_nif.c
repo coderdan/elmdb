@@ -475,19 +475,20 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   STAILQ_INIT(&elmdb_env->txn_queue);
 
   if((*ret = mdb_env_create(&(elmdb_env->env))) != MDB_SUCCESS) {
-    printf("Failed `mdb_env_create`\n");
+    LOG("Failed `mdb_env_create`\n");
     goto err1;
   }
   if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS) {
-    printf("Failed `mdb_env_set_mapsize`\n");
+    LOG("Failed `mdb_env_set_mapsize`\n");
     goto err1;
   }
   if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS) {
-    printf("Failed `mdb_env_set_maxdbs`\n");
+    LOG("Failed `mdb_env_set_maxdbs`\n");
     goto err1;
   }
+  printf("SET MAP SIZE OK\n");
   if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS) {
-    printf("Failed `mdb_env_open`\n");
+    LOG("Failed `mdb_env_open`\n");
     goto err2;
   }
   if((elmdb_env->op_lock = enif_mutex_create(elmdb_env->path)) == NULL)
@@ -500,10 +501,10 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   return elmdb_env;
 
  err2:
-  printf("AT ERR2\n");
+  LOG("AT ERR2\n");
   mdb_env_close(elmdb_env->env);
  err1:
-  printf("AT ERR1\n");
+  LOG("AT ERR1\n");
   return NULL;
 }
 
@@ -773,20 +774,20 @@ static ERL_NIF_TERM elmdb_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if(enif_get_string(env, argv[1], args->path, MAXPATHLEN, ERL_NIF_LATIN1) == 0)
     return BADARG;
 
-  printf("AAA\n");
+  LOG("AAA\n");
   if(get_env_open_opts(env, argv[2], &args->mapsize, &args->maxdbs, &args->envflags) == 0)
     return BADARG;
 
-  printf("BBB\n");
+  LOG("BBB\n");
   args->priv = (ElmdbPriv*)enif_priv_data(env);
   args->msg_env = enif_alloc_env();
   args->ref = enif_make_copy(args->msg_env, argv[0]);
   enif_self(env, &args->caller);
   ErlNifTid tid;
-  printf("CCC\n");
+  LOG("CCC\n");
   if((ret = enif_thread_create(args->path, &tid, elmdb_env_thread, args, NULL)) != 0)
     return ERRNO(ret);
-  printf("DDD\n");
+  LOG("DDD\n");
 
   return ATOM_OK;
 }

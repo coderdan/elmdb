@@ -554,7 +554,7 @@ typedef MDB_ID	txnid_t;
 	 *	Set this to 1 for copious tracing. Set to 2 to add dumps of all IDLs
 	 *	read from and written to the database (used for free space management).
 	 */
-#define MDB_DEBUG 0
+#define MDB_DEBUG 1
 #endif
 
 #if MDB_DEBUG
@@ -4178,6 +4178,7 @@ mdb_env_map(MDB_env *env, void *addr)
 {
 	MDB_page *p;
 	unsigned int flags = env->me_flags;
+    printf("MDBENVMAP X1\n");
 #ifdef _WIN32
 	int rc;
 	int access = SECTION_MAP_READ;
@@ -4201,8 +4202,9 @@ mdb_env_map(MDB_env *env, void *addr)
 	}
 
 	rc = NtCreateSection(&mh, access, NULL, NULL, secprot, SEC_RESERVE, env->me_fd);
-	if (rc)
+	if (rc) {
 		return mdb_nt2win32(rc);
+    }
 	map = addr;
 #ifdef MDB_VL32
 	msize = NUM_METAS * env->me_psize;
@@ -4213,10 +4215,12 @@ mdb_env_map(MDB_env *env, void *addr)
 #else
 	NtClose(mh);
 #endif
-	if (rc)
+	if (rc) {
 		return mdb_nt2win32(rc);
+    }
 	env->me_map = map;
 #else
+printf("MDBENVMAP X2\n");
 #ifdef MDB_VL32
 	(void) flags;
 	env->me_map = mmap(addr, NUM_METAS * env->me_psize, PROT_READ, MAP_SHARED,
@@ -4226,16 +4230,20 @@ mdb_env_map(MDB_env *env, void *addr)
 		return ErrCode();
 	}
 #else
+printf("MDBENVMAP X3\n");
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
 		prot |= PROT_WRITE;
-		if (ftruncate(env->me_fd, env->me_mapsize) < 0)
+		if (ftruncate(env->me_fd, env->me_mapsize) < 0) {
+printf("MDBENVMAP X3.1\n");
 			return ErrCode();
+        }
 	}
 	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
 		env->me_fd, 0);
 	if (env->me_map == MAP_FAILED) {
 		env->me_map = NULL;
+printf("MDBENVMAP X3.2\n");
 		return ErrCode();
 	}
 
@@ -4273,6 +4281,7 @@ mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 	/* If env is already open, caller is responsible for making
 	 * sure there are no active txns.
 	 */
+    printf("MDB 1\n");
 	if (env->me_map) {
 		MDB_meta *meta;
 #ifndef MDB_VL32
@@ -4305,6 +4314,8 @@ mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 	env->me_mapsize = size;
 	if (env->me_psize)
 		env->me_maxpg = env->me_mapsize / env->me_psize;
+
+    printf("MDB 2\n");
 	return MDB_SUCCESS;
 }
 
@@ -4426,6 +4437,7 @@ mdb_env_open2(MDB_env *env)
 		}
 	}
 #endif
+    printf("MDB2 0\n");
 
 	if ((i = mdb_env_read_header(env, &meta)) != 0) {
 		if (i != ENOENT)
@@ -4442,6 +4454,8 @@ mdb_env_open2(MDB_env *env)
 		env->me_psize = meta.mm_psize;
 	}
 
+    printf("MDB2 1\n");
+
 	/* Was a mapsize configured? */
 	if (!env->me_mapsize) {
 		env->me_mapsize = meta.mm_mapsize;
@@ -4456,6 +4470,7 @@ mdb_env_open2(MDB_env *env)
 	}
 	meta.mm_mapsize = env->me_mapsize;
 
+    printf("MDB2 2\n");
 	if (newenv && !(flags & MDB_FIXEDMAP)) {
 		/* mdb_env_map() may grow the datafile.  Write the metapages
 		 * first, so the file will be valid if initialization fails.
@@ -4465,8 +4480,10 @@ mdb_env_open2(MDB_env *env)
 		 * and map address which does not suit the main program.
 		 */
 		rc = mdb_env_init_meta(env, &meta);
-		if (rc)
+		if (rc) {
+            printf("MDB2 2.1, rc = %d\n", rc);
 			return rc;
+        }
 		newenv = 0;
 	}
 #ifdef _WIN32
@@ -4482,9 +4499,12 @@ mdb_env_open2(MDB_env *env)
 	}
 #endif
 
+    printf("MDB2 3\n");
 	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
-	if (rc)
+	if (rc) {
+        printf("MDB2 3.1, rc = %d\n", rc);
 		return rc;
+    }
 
 	if (newenv) {
 		if (flags & MDB_FIXEDMAP)
@@ -5090,8 +5110,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		rc = len + sizeof(LOCKNAME) + len + sizeof(DATANAME);
 	}
 	lpath = malloc(rc);
-	if (!lpath)
+	if (!lpath) {
+      printf("ENOMEM 1\n");
 		return ENOMEM;
+    }
 	if (flags & MDB_NOSUBDIR) {
 		dpath = lpath + len + sizeof(LOCKSUFF);
 		sprintf(lpath, "%s" LOCKSUFF, path);
@@ -5109,8 +5131,11 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		flags &= ~MDB_WRITEMAP;
 	} else {
 		if (!((env->me_free_pgs = mdb_midl_alloc(MDB_IDL_UM_MAX)) &&
-			  (env->me_dirty_list = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2)))))
+			  (env->me_dirty_list = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2))))) {
+
+      printf("ENOMEM 2\n");
 			rc = ENOMEM;
+        }
 	}
 #ifdef MDB_VL32
 	if (!rc) {
@@ -5124,14 +5149,17 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 #endif
 	env->me_flags = flags |= MDB_ENV_ACTIVE;
-	if (rc)
+	if (rc) {
+              printf("GO TO LEAVE 5137\n");
 		goto leave;
+    }
 
 	env->me_path = strdup(path);
 	env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
 	env->me_dbflags = calloc(env->me_maxdbs, sizeof(uint16_t));
 	env->me_dbiseqs = calloc(env->me_maxdbs, sizeof(unsigned int));
 	if (!(env->me_dbxs && env->me_path && env->me_dbflags && env->me_dbiseqs)) {
+      printf("ENOMEM 3\n");
 		rc = ENOMEM;
 		goto leave;
 	}
@@ -5140,8 +5168,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	/* For RDONLY, get lockfile after we know datafile exists */
 	if (!(flags & (MDB_RDONLY|MDB_NOLOCK))) {
 		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
-		if (rc)
+		if (rc) {
+              printf("GO TO LEAVE 5154\n");
 			goto leave;
+        }
 	}
 
 #ifdef _WIN32
@@ -5154,8 +5184,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 	mode = FILE_ATTRIBUTE_NORMAL;
 	rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
-	if (rc)
+	if (rc) {
+        printf("GO TO LEAVE 5168\n");
 		goto leave;
+    }
 	env->me_fd = CreateFileW(wpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
 		NULL, len, mode, NULL);
 	free(wpath);
@@ -5169,15 +5201,20 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #endif
 	if (env->me_fd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
+              printf("GO TO LEAVE 5182\n");
 		goto leave;
 	}
 
+  printf("MDB 10, rc = %d\n", rc);
 	if ((flags & (MDB_RDONLY|MDB_NOLOCK)) == MDB_RDONLY) {
 		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
-		if (rc)
+		if (rc) {
+              printf("GO TO LEAVE 5188\n");
 			goto leave;
+        }
 	}
 
+  printf("MDB 11, rc = %d\n", rc);
 	if ((rc = mdb_env_open2(env)) == MDB_SUCCESS) {
 		if (flags & (MDB_RDONLY|MDB_WRITEMAP)) {
 			env->me_mfd = env->me_fd;
@@ -5188,8 +5225,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #ifdef _WIN32
 			len = OPEN_EXISTING;
 			rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
-			if (rc)
+			if (rc) {
+              printf("GO TO LEAVE 5202\n");
 				goto leave;
+            }
 			env->me_mfd = CreateFileW(wpath, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
 				mode | FILE_FLAG_WRITE_THROUGH, NULL);
@@ -5200,14 +5239,17 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #endif
 			if (env->me_mfd == INVALID_HANDLE_VALUE) {
 				rc = ErrCode();
+              printf("GO TO LEAVE 5213\n");
 				goto leave;
 			}
 		}
 		DPRINTF(("opened dbenv %p", (void *) env));
 		if (excl > 0) {
 			rc = mdb_env_share_locks(env, &excl);
-			if (rc)
+			if (rc) {
+              printf("GO TO LEAVE 5220\n");
 				goto leave;
+            }
 		}
 		if (!(flags & MDB_RDONLY)) {
 			MDB_txn *txn;
@@ -5226,6 +5268,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				if (!txn->mt_rpages) {
 					free(txn);
 					rc = ENOMEM;
+              printf("GO TO LEAVE 5252\n");
 					goto leave;
 				}
 				txn->mt_rpages[0].mid = 0;
@@ -5235,6 +5278,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_flags = MDB_TXN_FINISHED;
 				env->me_txn0 = txn;
 			} else {
+      printf("ENOMEM 4\n");
 				rc = ENOMEM;
 			}
 		}
@@ -5245,6 +5289,7 @@ leave:
 		mdb_env_close0(env, excl);
 	}
 	free(lpath);
+    printf("In 'leave', rc = %d\n", rc);
 	return rc;
 }
 
