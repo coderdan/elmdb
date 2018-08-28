@@ -14,35 +14,41 @@ int main(int argc,char * argv[]) {
   MDB_val key, put_data, get_data;
   MDB_txn *txn;
   MDB_cursor *mc;
-  char kval[32] = "";
+  MDB_stat stat;
+  MDB_envinfo info;
+  char *kval = NULL;
   char *sval = NULL;
+
+  size_t gb = 100;
 
   E(mdb_env_create(&env));
   E(mdb_env_set_maxreaders(env, 1));
-  E(mdb_env_set_mapsize(env, 1073741824));
+  E(mdb_env_set_mapsize(env, (size_t)(gb * 1073741824)));
   E(mdb_env_open(env, "./testdb", MDB_NORDAHEAD, 0664));
   printf("ENV CREATED\n");
 
-  key.mv_size = sizeof(int);
-  key.mv_data = kval;
 
-  for (j = 1; j < 10; j++) {
-    printf("%d-%d\n", j, i);
+  for (j = 0; j < 100; j++) {
+    printf("SECTION %d-%d\n", j, i);
 
     E(mdb_txn_begin(env, NULL, 0, &txn));
     E(mdb_dbi_open(txn, NULL, 0, &dbi));
     E(mdb_cursor_open(txn, dbi, &mc));
 
-    for (i = 1; i < 100000; i++) {
+    for (i = 0; i < 100000; i++) {
+      kval = malloc(64 * sizeof(char));
+      key.mv_size = 64 * sizeof(char);
+      key.mv_data = kval;
       sprintf(kval, "%d-%d", j, i);
 
-      sval = malloc(32 * sizeof(char));
-      put_data.mv_size = 32;
+      sval = malloc(64 * sizeof(char));
+      put_data.mv_size = 64 * sizeof(char);
       put_data.mv_data = sval;
-      sprintf(sval, "%d-%daaaaaaaaaaaaaaa", j, i);
-      printf("%s\n", sval);
+      sprintf(sval, "%d-%d%--d", j, i, rand());
 
-      RES(MDB_KEYEXIST, mdb_cursor_put(mc, &key, &put_data, 0));
+      //printf("key[%s]=%s\n", kval, sval);
+
+      E(mdb_cursor_put(mc, &key, &put_data, 0));
 
       /*if (mdb_get(txn, dbi, &key, &get_data) == 0) {
         printf("%s => %s\n", key.mv_data, get_data.mv_data);
@@ -55,5 +61,9 @@ int main(int argc,char * argv[]) {
     E(mdb_txn_commit(txn));
     mdb_dbi_close(env, dbi);
   }
+  mdb_env_stat(env, &stat);
+  mdb_env_info(env, &info);
+  printf("ENV entries: %lu\n", stat.ms_entries);
+  printf("ENV map size: %lu\n", info.me_mapsize);
   mdb_env_close(env);
 }
