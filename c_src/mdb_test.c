@@ -28,14 +28,14 @@ int main(int argc,char * argv[]) {
   printf("ENV CREATED\n");
 
 
-  for (j = 0; j < 100; j++) {
+  for (j = 0; j < 10; j++) {
     printf("SECTION %d-%d\n", j, i);
 
     E(mdb_txn_begin(env, NULL, 0, &txn));
     E(mdb_dbi_open(txn, NULL, 0, &dbi));
     E(mdb_cursor_open(txn, dbi, &mc));
 
-    for (i = 0; i < 100000; i++) {
+    for (i = 0; i < 100; i++) {
       kval = malloc(64 * sizeof(char));
       key.mv_size = 64 * sizeof(char);
       key.mv_data = kval;

@@ -456,7 +456,7 @@ static int to_mdb_cursor_op(ErlNifEnv *env, ERL_NIF_TERM op, MDB_val *key) {
 /* FIXME (DD 26/8/2018) this function should return some
  * sensible error codes so that callers in erlang know what is going on.
  * Plus just exiting the erlang thread blindly is causing the BEAM to segfault.*/
-static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflags, int *ret) {
+static ElmdbEnv* open_env(const char *path, mdb_size_t mapsize, int maxdbs, int envflags, int *ret) {
   ElmdbEnv *elmdb_env;
 
   if((elmdb_env = enif_alloc_resource(elmdb_env_res, sizeof(ElmdbEnv))) == NULL)
@@ -478,6 +478,7 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
     LOG("Failed `mdb_env_create`\n");
     goto err1;
   }
+  printf("ERN NIF set mapsize %lu\n", mapsize);
   if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS) {
     LOG("Failed `mdb_env_set_mapsize`\n");
     goto err1;
@@ -577,6 +578,7 @@ static void* elmdb_env_thread(void *p) {
   OpEntry *q_txn = NULL;
   OpEntry *q_op = NULL;
 
+  printf("elmdb_env_thread mapsize = %lu\n", args->mapsize);
   if((elmdb_env = open_env(args->path, args->mapsize, args->maxdbs, args->envflags, &ret)) == NULL) {
     /* This sends a message to the calling erlang process - how do we receive it? */
     printf("ERROR code: %d\n", ret);

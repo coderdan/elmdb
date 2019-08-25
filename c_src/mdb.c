@@ -4239,6 +4239,7 @@ printf("MDBENVMAP X3.1\n");
 			return ErrCode();
         }
 	}
+    printf("MMAP allocating %lu bytes\n", env->me_mapsize);
 	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
 		env->me_fd, 0);
 	if (env->me_map == MAP_FAILED) {
@@ -4281,7 +4282,7 @@ mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 	/* If env is already open, caller is responsible for making
 	 * sure there are no active txns.
 	 */
-    printf("MDB 1\n");
+    printf("MDB 1, size: %lu\n", size);
 	if (env->me_map) {
 		MDB_meta *meta;
 #ifndef MDB_VL32
