@@ -94,7 +94,8 @@
          txn_cursor_get/2,
          txn_cursor_get/3,
          txn_cursor_put/3,
-         txn_cursor_put/4
+         txn_cursor_put/4,
+         txn_cursor_delete/2
         ]).
 
 
@@ -491,6 +492,17 @@ nif_txn_cursor_open(_Ref, _Txn, _Dbi) ->
 -spec txn_cursor_get(cursor(), cursor_op()) -> {ok, key(), val()} | not_found | elmdb_error().
 txn_cursor_get(Cur, Op) ->
     txn_cursor_get(Cur, Op, ?TIMEOUT).
+
+-spec txn_cursor_delete(cursor(), cursor_op()) -> {ok, key(), val()} | not_found | elmdb_error().
+txn_cursor_delete(Cur, Op) ->
+    Ref = make_ref(),
+    case nif_txn_cursor_delete(Ref, Cur, Op) of
+        ok    -> recv_async(Ref, ?TIMEOUT);
+        Error -> Error
+    end.
+
+nif_txn_cursor_delete(_Ref, _Cur, _Op) ->
+    ?NOT_LOADED.
 
 -spec txn_cursor_get(cursor(), cursor_op(), non_neg_integer()) -> {ok, key(), val()} | not_found | elmdb_error().
 txn_cursor_get(Cur, Op, Timeout) ->
