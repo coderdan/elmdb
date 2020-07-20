@@ -149,6 +149,10 @@ typedef struct {
 } cursor_put_args;
 
 typedef struct {
+  ElmdbCur *elmdb_cur;
+} cursor_delete_args;
+
+typedef struct {
   ElmdbTxn *elmdb_txn;
   ElmdbDbi *elmdb_dbi;
 } dbi_args;
@@ -1411,6 +1415,48 @@ static ERL_NIF_TERM elmdb_txn_cursor_get(ErlNifEnv* env, int argc, const ERL_NIF
   return ATOM_OK;
 }
 
+static MDB_txn* elmdb_txn_cursor_delete_handler(MDB_txn *txn, OpEntry *op) {
+  cursor_delete_args *args = (cursor_delete_args*)op->args;
+  int ret;
+  if((ret = mdb_cursor_del(args->elmdb_cur->cursor, 0)) == MDB_SUCCESS) {
+    SEND(op, ATOM_OK);
+  }
+  else SEND_ERRNO(op, ret);
+  enif_release_resource(args->elmdb_cur);
+  return txn;
+}
+
+static ERL_NIF_TERM elmdb_txn_cursor_delete(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+  ElmdbCur *elmdb_cur;
+
+  if(!(argc == 3 &&
+       enif_is_ref(env, argv[0]) &&
+       enif_get_resource(env, argv[1], elmdb_cur_res, (void**)&elmdb_cur) &&
+       (enif_is_atom(env, argv[2]) || enif_is_tuple(env, argv[2])))) {
+    return BADARG;
+  }
+
+  enif_mutex_lock(elmdb_cur->elmdb_txn->elmdb_env->txn_lock);
+  CHECK_ENV(elmdb_cur->elmdb_txn->elmdb_env);
+  if(elmdb_cur->elmdb_txn->ref != elmdb_cur->elmdb_txn->elmdb_env->active_txn_ref) {
+    enif_mutex_unlock(elmdb_cur->elmdb_txn->elmdb_env->txn_lock);
+    return ERR(ATOM_TXN_CLOSED);
+  }
+  enif_mutex_unlock(elmdb_cur->elmdb_txn->elmdb_env->txn_lock);
+  if(elmdb_cur->active == 0)
+    return ERR(ATOM_CUR_CLOSED);
+
+  cursor_delete_args *args = enif_alloc(sizeof(cursor_delete_args));
+  NEW_OP(op, args, elmdb_txn_cursor_delete_handler);
+  op->txn_ref = elmdb_cur->elmdb_txn->ref;
+
+  enif_keep_resource(elmdb_cur);
+  enif_mutex_lock(elmdb_cur->elmdb_txn->elmdb_env->op_lock);
+  PUSH(elmdb_cur->elmdb_txn->elmdb_env->op_queue, op);
+  enif_mutex_unlock(elmdb_cur->elmdb_txn->elmdb_env->op_lock);
+  return ATOM_OK;
+}
+
 static MDB_txn* elmdb_txn_cursor_put_handler(MDB_txn *txn, OpEntry *op) {
   cursor_put_args *args = (cursor_put_args*)op->args;
   int ret;
@@ -2442,7 +2488,8 @@ static ErlNifFunc nif_funcs [] = {
 
   {"nif_txn_cursor_open", 3, elmdb_txn_cursor_open, 0},
   {"nif_txn_cursor_get",  3, elmdb_txn_cursor_get, 0},
-  {"nif_txn_cursor_put",  4, elmdb_txn_cursor_put, 0}
+  {"nif_txn_cursor_put",  4, elmdb_txn_cursor_put, 0},
+  {"nif_txn_cursor_delete",  3, elmdb_txn_cursor_delete, 0}
 };
 
 /* driver entry point */
