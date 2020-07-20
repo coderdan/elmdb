@@ -37,6 +37,7 @@
 
 #include "lmdb.h"
 #include "queue.h"
+#include "mdb_ore_blk_compare.h"
 
 typedef struct _OpEntry {
   uint64_t txn_ref;
@@ -452,7 +453,10 @@ static int to_mdb_cursor_op(ErlNifEnv *env, ERL_NIF_TERM op, MDB_val *key) {
   return 0;
 }
 
-static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflags, int *ret) {
+/* FIXME (DD 26/8/2018) this function should return some
+ * sensible error codes so that callers in erlang know what is going on.
+ * Plus just exiting the erlang thread blindly is causing the BEAM to segfault.*/
+static ElmdbEnv* open_env(const char *path, mdb_size_t mapsize, int maxdbs, int envflags, int *ret) {
   ElmdbEnv *elmdb_env;
 
   if((elmdb_env = enif_alloc_resource(elmdb_env_res, sizeof(ElmdbEnv))) == NULL)
@@ -470,14 +474,24 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   STAILQ_INIT(&elmdb_env->op_queue);
   STAILQ_INIT(&elmdb_env->txn_queue);
 
-  if((*ret = mdb_env_create(&(elmdb_env->env))) != MDB_SUCCESS)
+  if((*ret = mdb_env_create(&(elmdb_env->env))) != MDB_SUCCESS) {
+    LOG("Failed `mdb_env_create`\n");
     goto err1;
-  if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS)
+  }
+  printf("ERN NIF set mapsize %lu\n", mapsize);
+  if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS) {
+    LOG("Failed `mdb_env_set_mapsize`\n");
     goto err1;
-  if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS)
+  }
+  if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS) {
+    LOG("Failed `mdb_env_set_maxdbs`\n");
     goto err1;
-  if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS)
+  }
+  printf("SET MAP SIZE OK\n");
+  if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS) {
+    LOG("Failed `mdb_env_open`\n");
     goto err2;
+  }
   if((elmdb_env->op_lock = enif_mutex_create(elmdb_env->path)) == NULL)
     goto err2;
   if((elmdb_env->txn_lock = enif_mutex_create(elmdb_env->path)) == NULL)
@@ -488,8 +502,10 @@ static ElmdbEnv* open_env(const char *path, int mapsize, int maxdbs, int envflag
   return elmdb_env;
 
  err2:
+  LOG("AT ERR2\n");
   mdb_env_close(elmdb_env->env);
  err1:
+  LOG("AT ERR1\n");
   return NULL;
 }
 
@@ -525,6 +541,8 @@ static void close_env(ElmdbEnv *elmdb_env) {
 }
 
 static int register_env(ElmdbPriv *priv, ElmdbEnv *elmdb_env) {
+  printf("register env\n");
+  printf("Attempting to allocate %u\n", sizeof(EnvEntry));
   EnvEntry *env_entry = enif_alloc(sizeof(EnvEntry));
   if(env_entry == NULL)
     return 0;
@@ -560,7 +578,10 @@ static void* elmdb_env_thread(void *p) {
   OpEntry *q_txn = NULL;
   OpEntry *q_op = NULL;
 
+  printf("elmdb_env_thread mapsize = %lu\n", args->mapsize);
   if((elmdb_env = open_env(args->path, args->mapsize, args->maxdbs, args->envflags, &ret)) == NULL) {
+    /* This sends a message to the calling erlang process - how do we receive it? */
+    printf("ERROR code: %d\n", ret);
     SEND_ERRNO(args, ret);
     enif_free_env(args->msg_env);
     goto shutdown;
@@ -615,6 +636,7 @@ static void* elmdb_env_thread(void *p) {
   }
   enif_mutex_unlock(elmdb_env->txn_lock);
  shutdown:
+  printf("Shutdown\n");
   unregister_env(priv, elmdb_env);
   close_env(elmdb_env);
   return NULL;
@@ -754,16 +776,20 @@ static ERL_NIF_TERM elmdb_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if(enif_get_string(env, argv[1], args->path, MAXPATHLEN, ERL_NIF_LATIN1) == 0)
     return BADARG;
 
+  LOG("AAA\n");
   if(get_env_open_opts(env, argv[2], &args->mapsize, &args->maxdbs, &args->envflags) == 0)
     return BADARG;
 
+  LOG("BBB\n");
   args->priv = (ElmdbPriv*)enif_priv_data(env);
   args->msg_env = enif_alloc_env();
   args->ref = enif_make_copy(args->msg_env, argv[0]);
   enif_self(env, &args->caller);
   ErlNifTid tid;
+  LOG("CCC\n");
   if((ret = enif_thread_create(args->path, &tid, elmdb_env_thread, args, NULL)) != 0)
     return ERRNO(ret);
+  LOG("DDD\n");
 
   return ATOM_OK;
 }
@@ -966,6 +992,72 @@ static MDB_txn* elmdb_txn_put_handler(MDB_txn *txn, OpEntry *op) {
   enif_release_resource(args->elmdb_dbi);
   return txn;
 }
+
+
+/* DD Added */
+
+static int internal_comparator(const MDB_val *a, const MDB_val *b) {
+  printf("COMP, a:size = %d\n", a->mv_size); fflush(stdout);
+  return 0;
+}
+
+static MDB_txn* elmdb_set_comparator_handler(MDB_txn *txn, OpEntry *op) {
+  kv_args *args = (kv_args*)op->args;
+  int ret;
+
+  LOG("Setting comparator\n");
+
+  if ((ret = mdb_set_compare(txn, args->elmdb_dbi->dbi, mdb_ore_blk_compare)) != MDB_SUCCESS) {
+    SEND_ERRNO(op, ret);
+  }
+  else {
+    SEND(op, ATOM_OK);
+  }
+  enif_release_resource(args->elmdb_txn);
+  enif_release_resource(args->elmdb_dbi);
+  return txn;
+}
+
+static ERL_NIF_TERM do_set_comparator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[], MDB_txn* (*handler)(MDB_txn*, OpEntry*)) {
+  ElmdbTxn *elmdb_txn;
+  ElmdbDbi *elmdb_dbi;
+
+  if(!(argc == 3 &&
+       enif_is_ref(env, argv[0]) &&
+       enif_get_resource(env, argv[1], elmdb_txn_res, (void**)&elmdb_txn) &&
+       enif_get_resource(env, argv[2], elmdb_dbi_res, (void**)&elmdb_dbi))) {
+    return BADARG;
+  }
+
+  enif_mutex_lock(elmdb_txn->elmdb_env->txn_lock);
+  CHECK_ENV(elmdb_txn->elmdb_env);
+  if(elmdb_txn->ref != elmdb_txn->elmdb_env->active_txn_ref) {
+    enif_mutex_unlock(elmdb_txn->elmdb_env->txn_lock);
+    return ERR(ATOM_TXN_CLOSED);
+  }
+  enif_mutex_unlock(elmdb_txn->elmdb_env->txn_lock);
+  if(elmdb_txn->elmdb_env->ref != elmdb_dbi->elmdb_env->ref)
+    return BADARG;
+  kv_args *args = enif_alloc(sizeof(kv_args));
+  NEW_OP_(op, args, handler);
+  op->txn_ref = elmdb_txn->ref;
+
+  args->elmdb_txn   = elmdb_txn;
+  args->elmdb_dbi   = elmdb_dbi;
+  enif_keep_resource(elmdb_txn);
+  enif_keep_resource(elmdb_dbi);
+  enif_mutex_lock(elmdb_txn->elmdb_env->op_lock);
+  PUSH(elmdb_txn->elmdb_env->op_queue, op);
+  enif_mutex_unlock(elmdb_txn->elmdb_env->op_lock);
+  return ATOM_OK;
+}
+
+static ERL_NIF_TERM elmdb_set_comparator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+  return do_set_comparator(env, argc, argv, elmdb_set_comparator_handler);
+}
+
+/*****************/
+
 
 static ERL_NIF_TERM do_txn_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[], MDB_txn* (*handler)(MDB_txn*, OpEntry*)) {
   ElmdbTxn *elmdb_txn;
@@ -2413,6 +2505,8 @@ static ErlNifFunc nif_funcs [] = {
   {"get",      2, elmdb_get, 0},
   {"delete",   2, elmdb_delete, 0},
   {"drop",     1, elmdb_drop, 0},
+
+  {"nif_set_comparator", 3, elmdb_set_comparator},
 
   {"nif_async_put",     4, elmdb_async_put, 0},
   {"nif_async_put_new", 4, elmdb_async_put_new, 0},

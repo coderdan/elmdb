@@ -48,6 +48,8 @@
          delete/2,
          drop/1,
 
+         set_comparator/2,
+
          async_put/3,
          async_put/4,
          async_put_new/3,
@@ -164,6 +166,13 @@ env_open(DirName, Opts, Timeout)
     end.
 
 nif_env_open(_Ref, _DirName, _Opts) ->
+    ?NOT_LOADED.
+
+set_comparator(Txn, Dbi) ->
+    Ref = make_ref(),
+    nif_set_comparator(Ref, Txn, Dbi).
+
+nif_set_comparator(_Ref, _Txn, _Dbi) ->
     ?NOT_LOADED.
 
 -spec env_close(env()) -> ok.
